@@ -1,0 +1,22 @@
+NBKI_Project/
+│
+├── main_gui.py              #  запуск GUI
+├── config.py                #  настройки (host, пути)
+│
+├── core/
+│   ├── file_manager.py      # поиск XML
+│   ├── formatter.py         # vkbeautify
+│   ├── signer.py            # ЭЦП (ecp.bat)
+│   ├── verifier.py          # снятие ЭЦП (cp.bat)
+│   ├── builder.py           # KO XML
+│
+├── services/
+│   ├── http_service.py      # requests POST
+│
+├── utils/
+│   ├── logger.py            # логирование
+│
+├── temp/                    # временные файлы
+├── output/                  # KO результаты
+├── logs/                    # логи
+└── requirements.txt
