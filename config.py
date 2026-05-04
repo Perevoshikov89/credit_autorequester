@@ -1,6 +1,12 @@
 import os
+import sys
 
-NBKI_PATH = r"D:\POST\НБКИ\Автозапросы"
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(__file__)
+
+NBKI_PATH = BASE_DIR
 
 REQ_PATTERN = "req_*.xml"
 
