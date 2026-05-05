@@ -1,27 +1,27 @@
 import requests
 import subprocess as sp
 import os
-import vkbeautify as vkb
-import shlex
 import fnmatch
+import vkbeautify as vkb
 
-NBKIpath = r"D:\POST\НБКИ\Автозапросы"
+NBKIpath = r"E:\НБКИ\Запросы"
 os.chdir(NBKIpath)
 
 reqName = "req_*.xml"
 host = 100
 
 # ---------------- URL ----------------
-if host == 100:
-    url = "http://client.demo.nbki.msk:8082/products/B2BRUTDF"
-elif host == 102:
-    url = "http://client-alfa.demo.nbki.msk:8082/products/B2BRUTDF"
-elif host == 103:
-    url = "https://reports.test-alfa.nbki.ru/products/B2BRUTDF"
-elif host == 200:
-    url = "http://client.demo.nbki.msk:8082/NbchScore"
-else:
+HOSTS = {
+    100: "http://client.demo.nbki.msk:8082/products/B2BRUTDF",
+    102: "http://client-alfa.demo.nbki.msk:8082/products/B2BRUTDF",
+    103: "https://reports.test-alfa.nbki.ru/products/B2BRUTDF",
+    200: "http://client.demo.nbki.msk:8082/NbchScore",
+}
+
+if host not in HOSTS:
     raise ValueError(f"Хост неизвестен: {host}")
+
+url = HOSTS[host]
 
 # ---------------- файлы ----------------
 sps = fnmatch.filter(os.listdir(NBKIpath), reqName)
@@ -30,39 +30,26 @@ count = 0
 for reqFile in sps:
     print(f"\nОбработка файла: {reqFile}")
 
-    # -------- форматирование XML --------
-    try:
-        with open(reqFile, "r", encoding="utf-8") as fi:
-            datareq = fi.read()
-
-        formatted = vkb.xml(datareq)
-
-        temp_name = "s_" + reqFile
-        with open(temp_name, "w", encoding="utf-8") as fo:
-            fo.write(formatted)
-
-        os.remove(reqFile)
-        os.rename(temp_name, reqFile)
-
-    except Exception as e:
-        print(f"Ошибка форматирования XML: {e}")
-        continue
+    full_path = os.path.abspath(reqFile)
 
     # -------- ЭЦП подпись --------
     try:
-        yesf = open("cp_yes.baton", "r")
-
-        CREATE_NO_WINDOW = 0x08000000
-        args = shlex.split(f'ecp.bat {reqFile}')
+        cmd = f'ecp.bat "{full_path}"'
 
         result = sp.run(
-            args,
-            stdin=yesf,
+            cmd,
+            shell=True,
             stdout=sp.PIPE,
-            creationflags=CREATE_NO_WINDOW
+            stderr=sp.PIPE,
+            timeout=60
         )
 
-        yesf.close()
+        print("STDOUT:", result.stdout.decode(errors="ignore"))
+        print("STDERR:", result.stderr.decode(errors="ignore"))
+
+        if result.returncode != 0:
+            raise RuntimeError("Ошибка подписи ЭЦП")
+
         print("Файл подписан ЭЦП")
 
     except Exception as e:
@@ -70,15 +57,19 @@ for reqFile in sps:
         continue
 
     # -------- отправка --------
-    sig_file = reqFile + ".sig"
+    sig_file = full_path + ".sig"
 
     try:
         with open(sig_file, "rb") as f:
             response = requests.post(
                 url,
                 data=f.read(),
-                headers={"Content-Type": "application/pkcs7"}
+                headers={"Content-Type": "application/pkcs7"},
+                timeout=60
             )
+
+        if response.status_code != 200:
+            raise RuntimeError(f"HTTP ошибка: {response.status_code}")
 
         print("Ответ хоста получен")
 
@@ -91,19 +82,22 @@ for reqFile in sps:
 
     # -------- снятие ЭЦП --------
     try:
-        yesf = open("cp_yes.baton", "r")
-
-        CREATE_NO_WINDOW = 0x08000000
-        args = shlex.split("cp.bat Pyt.xml")
+        cmd = 'cp.bat "Pyt.xml"'
 
         result = sp.run(
-            args,
-            stdin=yesf,
+            cmd,
+            shell=True,
             stdout=sp.PIPE,
-            creationflags=CREATE_NO_WINDOW
+            stderr=sp.PIPE,
+            timeout=60
         )
 
-        yesf.close()
+        print("STDOUT:", result.stdout.decode(errors="ignore"))
+        print("STDERR:", result.stderr.decode(errors="ignore"))
+
+        if result.returncode != 0:
+            raise RuntimeError("Ошибка снятия ЭЦП")
+
         print("ЭЦП снята")
 
     except Exception as e:
@@ -114,11 +108,21 @@ for reqFile in sps:
     try:
         out_name = reqFile.replace("req_", "KO_")
 
-        with open("des_Pyt.xml", "r", encoding="utf-8") as ind:
-            result_xml = vkb.xml(ind.read())
+        def read_xml(file):
+            for enc in ("utf-8", "cp1251", "windows-1251"):
+                try:
+                    with open(file, "r", encoding=enc) as f:
+                        return f.read()
+                except:
+                    continue
+            raise RuntimeError("Не удалось определить кодировку XML")
+
+        xml = read_xml("des_Pyt.xml")
+
+        formatted = vkb.xml(xml)
 
         with open(out_name, "w", encoding="utf-8") as out:
-            out.write(result_xml)
+            out.write(formatted)
 
         print(f"Результат записан в {out_name}")
 
@@ -126,12 +130,12 @@ for reqFile in sps:
         print(f"Ошибка записи результата: {e}")
 
     # -------- чистка --------
-    try:
-        os.remove(sig_file)
-        os.remove("des_Pyt.xml")
-        os.remove("Pyt.xml")
-    except:
-        pass
+    for f in [sig_file, "des_Pyt.xml", "Pyt.xml"]:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except:
+            pass
 
     count += 1
 
