@@ -4,7 +4,7 @@ import os
 import fnmatch
 import vkbeautify as vkb
 
-NBKIpath = r"E:\НБКИ\Запросы"
+NBKIpath = r"D:\НБКИ работа\Автозапросы\Допфайлы"
 os.chdir(NBKIpath)
 
 reqName = "req_*.xml"
