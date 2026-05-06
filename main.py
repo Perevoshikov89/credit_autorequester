@@ -1,16 +1,13 @@
+import tkinter as tk
+from tkinter import filedialog, ttk, scrolledtext
+import threading
 import requests
 import subprocess as sp
 import os
 import fnmatch
 import vkbeautify as vkb
 
-NBKIpath = r"D:\НБКИ работа\Автозапросы\Допфайлы"
-os.chdir(NBKIpath)
-
-reqName = "req_*.xml"
-host = 100
-
-# ---------------- URL ----------------
+# ---------------- HOST ----------------
 HOSTS = {
     100: "http://client.demo.nbki.msk:8082/products/B2BRUTDF",
     102: "http://client-alfa.demo.nbki.msk:8082/products/B2BRUTDF",
@@ -18,125 +15,210 @@ HOSTS = {
     200: "http://client.demo.nbki.msk:8082/NbchScore",
 }
 
-if host not in HOSTS:
-    raise ValueError(f"Хост неизвестен: {host}")
 
-url = HOSTS[host]
+class App:
 
-# ---------------- файлы ----------------
-sps = fnmatch.filter(os.listdir(NBKIpath), reqName)
-count = 0
+    def __init__(self, root):
+        self.root = root
+        self.root.title("NBKI Mini Tool")
+        self.root.geometry("750x500")
 
-for reqFile in sps:
-    print(f"\nОбработка файла: {reqFile}")
+        self.path = tk.StringVar()
+        self.host = tk.IntVar(value=100)
 
-    full_path = os.path.abspath(reqFile)
+        self.create_ui()
 
-    # -------- ЭЦП подпись --------
-    try:
-        cmd = f'ecp.bat "{full_path}"'
+    # ---------------- UI ----------------
+    def create_ui(self):
 
-        result = sp.run(
-            cmd,
-            shell=True,
-            stdout=sp.PIPE,
-            stderr=sp.PIPE,
-            timeout=60
-        )
+        top = tk.Frame(self.root)
+        top.pack(pady=10)
 
-        print("STDOUT:", result.stdout.decode(errors="ignore"))
-        print("STDERR:", result.stderr.decode(errors="ignore"))
+        # ПУТЬ
+        tk.Label(top, text="Папка:").pack(side=tk.LEFT)
 
-        if result.returncode != 0:
-            raise RuntimeError("Ошибка подписи ЭЦП")
+        tk.Entry(top, textvariable=self.path, width=40).pack(side=tk.LEFT, padx=5)
 
-        print("Файл подписан ЭЦП")
+        tk.Button(top, text="...", command=self.select_folder).pack(side=tk.LEFT)
 
-    except Exception as e:
-        print(f"Ошибка подписи ЭЦП: {e}")
-        continue
+        # HOST
+        ttk.Combobox(
+            top,
+            textvariable=self.host,
+            values=[100, 102, 103, 200],
+            width=5
+        ).pack(side=tk.LEFT, padx=10)
 
-    # -------- отправка --------
-    sig_file = full_path + ".sig"
+        # START
+        tk.Button(top, text="СТАРТ", bg="green", fg="white",
+                  command=self.start).pack(side=tk.LEFT)
 
-    try:
-        with open(sig_file, "rb") as f:
-            response = requests.post(
-                url,
-                data=f.read(),
-                headers={"Content-Type": "application/pkcs7"},
-                timeout=60
-            )
+        # PROGRESS
+        self.progress = ttk.Progressbar(self.root, length=700)
+        self.progress.pack(pady=10)
 
-        if response.status_code != 200:
-            raise RuntimeError(f"HTTP ошибка: {response.status_code}")
+        # LOG
+        self.log_box = scrolledtext.ScrolledText(self.root, height=20)
+        self.log_box.pack(fill=tk.BOTH, expand=True)
 
-        print("Ответ хоста получен")
+    # ---------------- LOG ----------------
+    def log(self, text):
+        self.log_box.insert(tk.END, text + "\n")
+        self.log_box.see(tk.END)
 
-        with open("Pyt.xml", "wb") as out:
-            out.write(response.content)
+    # ---------------- SELECT FOLDER ----------------
+    def select_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.path.set(folder)
 
-    except Exception as e:
-        print(f"Ошибка запроса: {e}")
-        continue
+    # ---------------- START ----------------
+    def start(self):
+        threading.Thread(target=self.process).start()
 
-    # -------- снятие ЭЦП --------
-    try:
-        cmd = 'cp.bat "Pyt.xml"'
+    # ---------------- PROCESS ----------------
+    def process(self):
 
-        result = sp.run(
-            cmd,
-            shell=True,
-            stdout=sp.PIPE,
-            stderr=sp.PIPE,
-            timeout=60
-        )
+        NBKIpath = self.path.get()
+        host = self.host.get()
 
-        print("STDOUT:", result.stdout.decode(errors="ignore"))
-        print("STDERR:", result.stderr.decode(errors="ignore"))
+        if not NBKIpath:
+            self.log("❌ Выбери папку")
+            return
 
-        if result.returncode != 0:
-            raise RuntimeError("Ошибка снятия ЭЦП")
+        if host not in HOSTS:
+            self.log("❌ Неверный host")
+            return
 
-        print("ЭЦП снята")
+        url = HOSTS[host]
 
-    except Exception as e:
-        print(f"Ошибка снятия ЭЦП: {e}")
-        continue
+        os.chdir(NBKIpath)
 
-    # -------- сохранение результата --------
-    try:
-        out_name = reqFile.replace("req_", "KO_")
+        files = fnmatch.filter(os.listdir(NBKIpath), "req_*.xml")
 
-        def read_xml(file):
-            for enc in ("utf-8", "cp1251", "windows-1251"):
+        total = len(files)
+        self.progress["maximum"] = total
+        self.progress["value"] = 0
+
+        self.log(f"Найдено файлов: {total}")
+
+        for i, reqFile in enumerate(files):
+
+            self.log(f"\nОбработка: {reqFile}")
+            full_path = os.path.abspath(reqFile)
+
+            # -------- ЭЦП --------
+            try:
+                cmd = f'ecp.bat "{full_path}"'
+
+                result = sp.run(
+                    cmd,
+                    shell=True,
+                    stdout=sp.PIPE,
+                    stderr=sp.PIPE,
+                    timeout=60
+                )
+
+                self.log(result.stdout.decode(errors="ignore"))
+                self.log(result.stderr.decode(errors="ignore"))
+
+                if result.returncode != 0:
+                    raise RuntimeError("Ошибка ЭЦП")
+
+                self.log("✔ Подписано")
+
+            except Exception as e:
+                self.log(f"❌ ЭЦП ошибка: {e}")
+                continue
+
+            # -------- POST --------
+            sig_file = full_path + ".sig"
+
+            try:
+                with open(sig_file, "rb") as f:
+                    response = requests.post(
+                        url,
+                        data=f.read(),
+                        headers={"Content-Type": "application/pkcs7"},
+                        timeout=60
+                    )
+
+                if response.status_code != 200:
+                    raise RuntimeError(f"HTTP {response.status_code}")
+
+                with open("Pyt.xml", "wb") as f:
+                    f.write(response.content)
+
+                self.log("✔ Ответ получен")
+
+            except Exception as e:
+                self.log(f"❌ Ошибка запроса: {e}")
+                continue
+
+            # -------- UNSIGN --------
+            try:
+                cmd = 'cp.bat "Pyt.xml"'
+
+                result = sp.run(
+                    cmd,
+                    shell=True,
+                    stdout=sp.PIPE,
+                    stderr=sp.PIPE,
+                    timeout=60
+                )
+
+                self.log(result.stdout.decode(errors="ignore"))
+
+                if result.returncode != 0:
+                    raise RuntimeError("Ошибка снятия ЭЦП")
+
+                self.log("✔ ЭЦП снята")
+
+            except Exception as e:
+                self.log(f"❌ Ошибка снятия: {e}")
+                continue
+
+            # -------- RESULT --------
+            try:
+                out_name = reqFile.replace("req_", "KO_")
+
+                def read_xml(file):
+                    for enc in ("utf-8", "cp1251", "windows-1251"):
+                        try:
+                            with open(file, "r", encoding=enc) as f:
+                                return f.read()
+                        except:
+                            continue
+                    raise RuntimeError("Кодировка не определена")
+
+                xml = read_xml("des_Pyt.xml")
+
+                formatted = vkb.xml(xml)
+
+                with open(out_name, "w", encoding="utf-8") as f:
+                    f.write(formatted)
+
+                self.log(f"✔ Сохранено: {out_name}")
+
+            except Exception as e:
+                self.log(f"❌ Ошибка записи: {e}")
+
+            # -------- CLEAN --------
+            for f in [sig_file, "des_Pyt.xml", "Pyt.xml"]:
                 try:
-                    with open(file, "r", encoding=enc) as f:
-                        return f.read()
+                    if os.path.exists(f):
+                        os.remove(f)
                 except:
-                    continue
-            raise RuntimeError("Не удалось определить кодировку XML")
+                    pass
 
-        xml = read_xml("des_Pyt.xml")
+            self.progress["value"] = i + 1
+            self.root.update_idletasks()
 
-        formatted = vkb.xml(xml)
+        self.log("\n✅ Готово")
 
-        with open(out_name, "w", encoding="utf-8") as out:
-            out.write(formatted)
 
-        print(f"Результат записан в {out_name}")
-
-    except Exception as e:
-        print(f"Ошибка записи результата: {e}")
-
-    # -------- чистка --------
-    for f in [sig_file, "des_Pyt.xml", "Pyt.xml"]:
-        try:
-            if os.path.exists(f):
-                os.remove(f)
-        except:
-            pass
-
-    count += 1
-
-print(f"\nГотово. Обработано файлов: {count}")
+# ---------------- RUN ----------------
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
